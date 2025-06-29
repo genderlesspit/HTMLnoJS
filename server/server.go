@@ -114,11 +114,36 @@ func (s *Server) registerBuiltinRoutes() {
 		}
 
 		w.Header().Set("Content-Type", "text/plain")
-		// Generate route map from the builder
-		builder := &routebuilder.AllRoutesBuilder{}
-		builder.GetRouteCollection = func() *routebuilder.RouteCollection { return s.routes }
-		routeMap := builder.GenerateRouteMap()
-		fmt.Fprint(w, routeMap)
+		fmt.Fprintf(w, "=== HTMLnoJS Route Map ===\n\n")
+
+		// HTML Routes
+		fmt.Fprintf(w, "HTML ROUTES:\n")
+		for _, route := range s.routes.HTMLRoutes {
+			auth := ""
+			if route.RequiresAuth {
+				auth = " [AUTH]"
+			}
+			fmt.Fprintf(w, "  %s %s -> %s%s\n", route.Method, route.Route, route.Name, auth)
+		}
+
+		// CSS Routes
+		fmt.Fprintf(w, "\nCSS ROUTES:\n")
+		for _, route := range s.routes.CSSRoutes {
+			fmt.Fprintf(w, "  %s %s -> %s [%s]\n", route.Method, route.Route, route.Name, route.Category)
+		}
+
+		// Python Routes
+		fmt.Fprintf(w, "\nPYTHON API ROUTES:\n")
+		for _, route := range s.routes.PythonRoutes {
+			auth := ""
+			if route.RequiresAuth {
+				auth = " [AUTH]"
+			}
+			fmt.Fprintf(w, "  %s %s -> %s%s\n", route.Method, route.Route, route.Function, auth)
+		}
+
+		// Summary
+		fmt.Fprintf(w, "\nSUMMARY: %d total routes\n", s.routes.Metadata.TotalRoutes)
 	})
 
 	// Metrics endpoint (if enabled)
@@ -128,11 +153,11 @@ func (s *Server) registerBuiltinRoutes() {
 }
 
 func (s *Server) wrapHandler(handler http.HandlerFunc, requiresAuth bool) http.HandlerFunc {
-	wrapped := handler
+	wrapped := http.Handler(handler)
 
 	// Apply authentication if required
 	if requiresAuth {
-		wrapped = s.authMiddleware(wrapped)
+		wrapped = http.HandlerFunc(s.authMiddleware(handler))
 	}
 
 	// Apply common middleware
@@ -140,45 +165,54 @@ func (s *Server) wrapHandler(handler http.HandlerFunc, requiresAuth bool) http.H
 		wrapped = s.middleware[i](wrapped)
 	}
 
-	return wrapped
+	// Convert back to HandlerFunc
+	return func(w http.ResponseWriter, r *http.Request) {
+		wrapped.ServeHTTP(w, r)
+	}
 }
 
 func (s *Server) wrapStaticHandler(handler http.HandlerFunc) http.HandlerFunc {
-	wrapped := handler
+	wrapped := http.Handler(handler)
 
 	// Apply static file middleware (caching, compression)
-	wrapped = s.staticMiddleware(wrapped)
+	wrapped = http.HandlerFunc(s.staticMiddleware(handler))
 
 	// Apply CORS if enabled
 	if s.config.EnableCORS {
-		wrapped = s.corsMiddleware(wrapped)
+		wrapped = http.HandlerFunc(s.corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
+			wrapped.ServeHTTP(w, r)
+		}))
 	}
 
-	return wrapped
+	return func(w http.ResponseWriter, r *http.Request) {
+		wrapped.ServeHTTP(w, r)
+	}
 }
 
 func (s *Server) wrapAPIHandler(handler http.HandlerFunc, requiresAuth bool, rateLimit int, cacheTimeout int) http.HandlerFunc {
-	wrapped := handler
+	wrapped := http.Handler(handler)
 
 	// Apply caching if configured
 	if cacheTimeout > 0 {
-		wrapped = s.cacheMiddleware(wrapped, cacheTimeout)
+		wrapped = http.HandlerFunc(s.cacheMiddleware(handler, cacheTimeout))
 	}
 
 	// Apply rate limiting if configured
 	if rateLimit > 0 {
-		wrapped = s.rateLimitMiddleware(wrapped, rateLimit)
+		wrapped = http.HandlerFunc(s.rateLimitMiddleware(handler, rateLimit))
 	}
 
 	// Apply authentication if required
 	if requiresAuth {
-		wrapped = s.authMiddleware(wrapped)
+		wrapped = http.HandlerFunc(s.authMiddleware(handler))
 	}
 
 	// Apply API middleware (JSON handling, CORS, etc.)
-	wrapped = s.apiMiddleware(wrapped)
+	wrapped = http.HandlerFunc(s.apiMiddleware(handler))
 
-	return wrapped
+	return func(w http.ResponseWriter, r *http.Request) {
+		wrapped.ServeHTTP(w, r)
+	}
 }
 
 // Start starts the HTTP server

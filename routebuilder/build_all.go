@@ -30,7 +30,7 @@ type AllRoutesBuilder struct {
 	templatesDir string
 	cssDir       string
 	pyHTMXDir    string
-	collection   RouteCollection
+	Collection   RouteCollection
 }
 
 // NewAllRoutesBuilder creates a unified route builder
@@ -39,7 +39,7 @@ func NewAllRoutesBuilder(templatesDir, cssDir, pyHTMXDir string) *AllRoutesBuild
 		templatesDir: templatesDir,
 		cssDir:       cssDir,
 		pyHTMXDir:    pyHTMXDir,
-		collection: RouteCollection{
+		Collection: RouteCollection{
 			HTMLRoutes:   make([]HTMLRoute, 0),
 			CSSRoutes:    make([]CSSRoute, 0),
 			PythonRoutes: make([]PythonRoute, 0),
@@ -80,7 +80,7 @@ func (a *AllRoutesBuilder) BuildAllRoutes(htmlFiles, cssFiles, pythonFiles []str
 	// Step 6: Log summary
 	a.logBuildSummary()
 
-	return &a.collection, nil
+	return &a.Collection, nil
 }
 
 func (a *AllRoutesBuilder) buildCSSRoutes(cssFiles []string) error {
@@ -92,7 +92,7 @@ func (a *AllRoutesBuilder) buildCSSRoutes(cssFiles []string) error {
 		return err
 	}
 
-	a.collection.CSSRoutes = routes
+	a.Collection.CSSRoutes = routes
 	log.Printf("Built %d CSS routes", len(routes))
 	return nil
 }
@@ -106,7 +106,7 @@ func (a *AllRoutesBuilder) buildPythonRoutes(pythonFiles []string) error {
 		return err
 	}
 
-	a.collection.PythonRoutes = routes
+	a.Collection.PythonRoutes = routes
 	log.Printf("Built %d Python routes", len(routes))
 	return nil
 }
@@ -115,8 +115,8 @@ func (a *AllRoutesBuilder) buildHTMLRoutes(htmlFiles []string) error {
 	log.Printf("Building HTML routes from %d files...", len(htmlFiles))
 
 	// Extract CSS file paths for HTML builder
-	cssFilePaths := make([]string, len(a.collection.CSSRoutes))
-	for i, route := range a.collection.CSSRoutes {
+	cssFilePaths := make([]string, len(a.Collection.CSSRoutes))
+	for i, route := range a.Collection.CSSRoutes {
 		cssFilePaths[i] = route.FilePath
 	}
 
@@ -126,7 +126,7 @@ func (a *AllRoutesBuilder) buildHTMLRoutes(htmlFiles []string) error {
 		return err
 	}
 
-	a.collection.HTMLRoutes = routes
+	a.Collection.HTMLRoutes = routes
 	log.Printf("Built %d HTML routes", len(routes))
 	return nil
 }
@@ -136,23 +136,23 @@ func (a *AllRoutesBuilder) crossReferenceRoutes() error {
 
 	// Map Python routes for quick lookup
 	pythonRouteMap := make(map[string]PythonRoute)
-	for _, route := range a.collection.PythonRoutes {
+	for _, route := range a.Collection.PythonRoutes {
 		pythonRouteMap[route.Route] = route
 	}
 
 	// Validate HTML → Python API references
-	for i, htmlRoute := range a.collection.HTMLRoutes {
+	for i, htmlRoute := range a.Collection.HTMLRoutes {
 		deps := a.findHTMLDependencies(htmlRoute, pythonRouteMap)
-		a.collection.Dependencies[htmlRoute.Route] = deps
+		a.Collection.Metadata.Dependencies[htmlRoute.Route] = deps
 
 		// Update HTML route with validated dependencies
-		a.collection.HTMLRoutes[i].Metadata["api_dependencies"] = deps
+		a.Collection.HTMLRoutes[i].Metadata["api_dependencies"] = deps
 	}
 
 	// Validate CSS dependencies
-	for i, cssRoute := range a.collection.CSSRoutes {
+	for i, cssRoute := range a.Collection.CSSRoutes {
 		if len(cssRoute.Dependencies) > 0 {
-			a.collection.Dependencies[cssRoute.Route] = cssRoute.Dependencies
+			a.Collection.Metadata.Dependencies[cssRoute.Route] = cssRoute.Dependencies
 		}
 
 		// Validate that dependencies exist
@@ -162,7 +162,7 @@ func (a *AllRoutesBuilder) crossReferenceRoutes() error {
 			}
 		}
 
-		a.collection.CSSRoutes[i] = cssRoute
+		a.Collection.CSSRoutes[i] = cssRoute
 	}
 
 	return nil
@@ -198,7 +198,7 @@ func (a *AllRoutesBuilder) findHTMLDependencies(htmlRoute HTMLRoute, pythonRoute
 }
 
 func (a *AllRoutesBuilder) cssExists(cssName string) bool {
-	for _, route := range a.collection.CSSRoutes {
+	for _, route := range a.Collection.CSSRoutes {
 		if route.Name == cssName || route.Category == cssName {
 			return true
 		}
@@ -207,28 +207,28 @@ func (a *AllRoutesBuilder) cssExists(cssName string) bool {
 }
 
 func (a *AllRoutesBuilder) generateMetadata() {
-	meta := &a.collection.Metadata
+	meta := &a.Collection.Metadata
 
 	// Count totals
-	meta.HTMLCount = len(a.collection.HTMLRoutes)
-	meta.CSSCount = len(a.collection.CSSRoutes)
-	meta.PythonCount = len(a.collection.PythonRoutes)
+	meta.HTMLCount = len(a.Collection.HTMLRoutes)
+	meta.CSSCount = len(a.Collection.CSSRoutes)
+	meta.PythonCount = len(a.Collection.PythonRoutes)
 	meta.TotalRoutes = meta.HTMLCount + meta.CSSCount + meta.PythonCount
 
 	// Count auth-required routes
-	for _, route := range a.collection.HTMLRoutes {
+	for _, route := range a.Collection.HTMLRoutes {
 		if route.RequiresAuth {
 			meta.AuthRequired++
 		}
 	}
-	for _, route := range a.collection.PythonRoutes {
+	for _, route := range a.Collection.PythonRoutes {
 		if route.RequiresAuth {
 			meta.AuthRequired++
 		}
 	}
 
 	// Count cache-enabled routes
-	for _, route := range a.collection.PythonRoutes {
+	for _, route := range a.Collection.PythonRoutes {
 		if route.CacheTimeout > 0 {
 			meta.CacheEnabled++
 		}
@@ -243,15 +243,15 @@ func (a *AllRoutesBuilder) generateMetadata() {
 
 func (a *AllRoutesBuilder) generateCSSLoadOrder() []string {
 	// CSS routes are already sorted by load order
-	loadOrder := make([]string, len(a.collection.CSSRoutes))
-	for i, route := range a.collection.CSSRoutes {
+	loadOrder := make([]string, len(a.Collection.CSSRoutes))
+	for i, route := range a.Collection.CSSRoutes {
 		loadOrder[i] = route.Route
 	}
 	return loadOrder
 }
 
 func (a *AllRoutesBuilder) logBuildSummary() {
-	meta := a.collection.Metadata
+	meta := a.Collection.Metadata
 
 	log.Printf("=== Route Build Summary ===")
 	log.Printf("Total Routes: %d", meta.TotalRoutes)
@@ -269,7 +269,7 @@ func (a *AllRoutesBuilder) logBuildSummary() {
 func (a *AllRoutesBuilder) logRouteBreakdown() {
 	// CSS breakdown by category
 	cssCategories := make(map[string]int)
-	for _, route := range a.collection.CSSRoutes {
+	for _, route := range a.Collection.CSSRoutes {
 		cssCategories[route.Category]++
 	}
 
@@ -280,7 +280,7 @@ func (a *AllRoutesBuilder) logRouteBreakdown() {
 
 	// Python breakdown by method
 	pythonMethods := make(map[string]int)
-	for _, route := range a.collection.PythonRoutes {
+	for _, route := range a.Collection.PythonRoutes {
 		pythonMethods[route.Method]++
 	}
 
@@ -292,7 +292,7 @@ func (a *AllRoutesBuilder) logRouteBreakdown() {
 	// HTML breakdown by auth requirement
 	authRequired := 0
 	publicRoutes := 0
-	for _, route := range a.collection.HTMLRoutes {
+	for _, route := range a.Collection.HTMLRoutes {
 		if route.RequiresAuth {
 			authRequired++
 		} else {
@@ -309,28 +309,28 @@ func (a *AllRoutesBuilder) logRouteBreakdown() {
 
 // GetRouteCollection returns the complete route collection
 func (a *AllRoutesBuilder) GetRouteCollection() *RouteCollection {
-	return &a.collection
+	return &a.Collection
 }
 
 // GetHTMLRoutes returns all HTML routes
 func (a *AllRoutesBuilder) GetHTMLRoutes() []HTMLRoute {
-	return a.collection.HTMLRoutes
+	return a.Collection.HTMLRoutes
 }
 
 // GetCSSRoutes returns all CSS routes in load order
 func (a *AllRoutesBuilder) GetCSSRoutes() []CSSRoute {
-	return a.collection.CSSRoutes
+	return a.Collection.CSSRoutes
 }
 
 // GetPythonRoutes returns all Python routes
 func (a *AllRoutesBuilder) GetPythonRoutes() []PythonRoute {
-	return a.collection.PythonRoutes
+	return a.Collection.PythonRoutes
 }
 
 // GetPublicHTMLRoutes returns HTML routes that don't require auth
 func (a *AllRoutesBuilder) GetPublicHTMLRoutes() []HTMLRoute {
 	var public []HTMLRoute
-	for _, route := range a.collection.HTMLRoutes {
+	for _, route := range a.Collection.HTMLRoutes {
 		if !route.RequiresAuth {
 			public = append(public, route)
 		}
@@ -340,8 +340,8 @@ func (a *AllRoutesBuilder) GetPublicHTMLRoutes() []HTMLRoute {
 
 // GetAPIRoutes returns all Python API routes sorted by path
 func (a *AllRoutesBuilder) GetAPIRoutes() []PythonRoute {
-	routes := make([]PythonRoute, len(a.collection.PythonRoutes))
-	copy(routes, a.collection.PythonRoutes)
+	routes := make([]PythonRoute, len(a.Collection.PythonRoutes))
+	copy(routes, a.Collection.PythonRoutes)
 
 	sort.Slice(routes, func(i, j int) bool {
 		return routes[i].Route < routes[j].Route
@@ -358,7 +358,7 @@ func (a *AllRoutesBuilder) GenerateRouteMap() string {
 
 	// HTML Routes
 	builder.WriteString("HTML ROUTES:\n")
-	for _, route := range a.collection.HTMLRoutes {
+	for _, route := range a.Collection.HTMLRoutes {
 		auth := ""
 		if route.RequiresAuth {
 			auth = " [AUTH]"
@@ -369,14 +369,14 @@ func (a *AllRoutesBuilder) GenerateRouteMap() string {
 
 	// CSS Routes
 	builder.WriteString("\nCSS ROUTES (Load Order):\n")
-	for i, route := range a.collection.CSSRoutes {
+	for i, route := range a.Collection.CSSRoutes {
 		builder.WriteString(fmt.Sprintf("  %d. %s -> %s [%s]\n",
 			i+1, route.Route, route.Name, route.Category))
 	}
 
 	// Python Routes
 	builder.WriteString("\nPYTHON API ROUTES:\n")
-	for _, route := range a.collection.PythonRoutes {
+	for _, route := range a.Collection.PythonRoutes {
 		auth := ""
 		if route.RequiresAuth {
 			auth = " [AUTH]"
@@ -390,7 +390,7 @@ func (a *AllRoutesBuilder) GenerateRouteMap() string {
 	}
 
 	// Summary
-	meta := a.collection.Metadata
+	meta := a.Collection.Metadata
 	builder.WriteString(fmt.Sprintf("\nSUMMARY: %d total routes (%d HTML, %d CSS, %d Python)\n",
 		meta.TotalRoutes, meta.HTMLCount, meta.CSSCount, meta.PythonCount))
 

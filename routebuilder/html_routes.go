@@ -3,6 +3,7 @@ package routebuilder
 import (
 	"fmt"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 )
@@ -138,18 +139,52 @@ func (h *HTMLRouteBuilder) determineCSSFiles(templateName string) []string {
 
 func (h *HTMLRouteBuilder) createTemplateHandler(templatePath string, cssFiles []string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// TODO: Implement template rendering with CSS injection
-		// This is a placeholder that would:
-		// 1. Read the HTML template
-		// 2. Inject CSS files into <head>
-		// 3. Process any template variables
-		// 4. Return the rendered HTML
+		// Read the HTML template file
+		content, err := os.ReadFile(templatePath)
+		if err != nil {
+			http.Error(w, "Template not found", http.StatusNotFound)
+			return
+		}
 
-		w.Header().Set("Content-Type", "text/html")
-		fmt.Fprintf(w, "<!-- Template: %s -->", templatePath)
-		fmt.Fprintf(w, "<!-- CSS Files: %v -->", cssFiles)
-		fmt.Fprintf(w, "<h1>Route handler for %s</h1>", templatePath)
+		// Convert to string for processing
+		html := string(content)
+
+		// Inject CSS files into the head section
+		cssLinks := h.generateCSSLinks(cssFiles)
+		if cssLinks != "" {
+			// Try to inject after <head> tag
+			if strings.Contains(html, "<head>") {
+				html = strings.Replace(html, "<head>", "<head>\n    "+cssLinks, 1)
+			} else if strings.Contains(html, "<html>") {
+				// If no head tag, inject after <html>
+				html = strings.Replace(html, "<html>", "<html>\n<head>\n    "+cssLinks+"\n</head>", 1)
+			} else {
+				// If no html structure, prepend CSS
+				html = cssLinks + "\n" + html
+			}
+		}
+
+		// Set content type and serve
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(html))
 	}
+}
+
+func (h *HTMLRouteBuilder) generateCSSLinks(cssFiles []string) string {
+	if len(cssFiles) == 0 {
+		return ""
+	}
+
+	var links []string
+	for _, cssFile := range cssFiles {
+		// Convert file path to URL path
+		cssName := filepath.Base(cssFile)
+		cssURL := "/css/" + cssName
+		links = append(links, fmt.Sprintf(`<link rel="stylesheet" href="%s">`, cssURL))
+	}
+
+	return strings.Join(links, "\n    ")
 }
 
 // GetRoutes returns all built routes
