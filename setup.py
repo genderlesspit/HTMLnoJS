@@ -6,7 +6,9 @@ from pathlib import Path
 
 # Read README
 this_directory = Path(__file__).parent
-long_description = (this_directory / "README.md").read_text() if (this_directory / "README.md").exists() else ""
+long_description = ""
+if (this_directory / "README.md").exists():
+    long_description = (this_directory / "README.md").read_text(encoding="utf-8")
 
 setup(
     name="htmlnojs",
@@ -19,6 +21,8 @@ setup(
     url="https://github.com/htmlnojs/python-orchestrator",
 
     packages=find_packages(),
+    include_package_data=True,
+
     classifiers=[
         "Development Status :: 3 - Alpha",
         "Intended Audience :: Developers",
@@ -41,6 +45,8 @@ setup(
         "uvicorn[standard]>=0.15.0",
         "aiohttp>=3.8.0",
         "loguru>=0.6.0",
+        "psutil>=5.8.0",
+        "python-multipart>=0.0.5",
     ],
 
     extras_require={
@@ -67,5 +73,9 @@ setup(
         "Bug Reports": "https://github.com/htmlnojs/python-orchestrator/issues",
         "Source": "https://github.com/htmlnojs/python-orchestrator",
         "Documentation": "https://htmlnojs.dev/docs",
+    },
+
+    package_data={
+        "htmlnojs": ["go-server/**/*"],
     },
 )

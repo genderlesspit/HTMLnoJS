@@ -1,0 +1,68 @@
+[build-system]
+requires = ["setuptools>=45", "wheel", "setuptools_scm[toml]>=6.2"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "htmlnojs"
+version = "0.1.0"
+authors = [
+    {name = "genderlesspit"},
+]
+description = "Async Python orchestrator for HTML-first web applications"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.8"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Internet :: WWW/HTTP :: HTTP Servers",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Internet :: WWW/HTTP :: Dynamic Content",
+]
+keywords = ["web", "htmx", "go", "async", "html-first"]
+
+dependencies = [
+    "fastapi>=0.68.0",
+    "uvicorn[standard]>=0.15.0",
+    "aiohttp>=3.8.0",
+    "loguru>=0.6.0",
+    "psutil>=5.8.0",  # For port management
+    "python-multipart>=0.0.5",  # For form handling
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=6.0",
+    "pytest-asyncio>=0.18.0",
+    "black>=21.0.0",
+    "flake8>=3.9.0",
+    "mypy>=0.910",
+]
+docs = [
+    "mkdocs>=1.2.0",
+    "mkdocs-material>=7.0.0",
+]
+
+[project.urls]
+Homepage = "https://htmlnojs.dev"
+Documentation = "https://htmlnojs.dev/docs"
+Repository = "https://github.com/htmlnojs/python-orchestrator"
+"Bug Reports" = "https://github.com/htmlnojs/python-orchestrator/issues"
+
+[project.scripts]
+htmlnojs = "htmlnojs.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["htmlnojs*"]
+
+[tool.setuptools.package-data]
+htmlnojs = ["go-server/**/*"]

@@ -22,7 +22,6 @@ __all__ = [
     "stop_all",
 
     # Components (for advanced usage)
-    "ProjectManager",
     "GoServer",
     "HTMXServer",
     "PortManager",

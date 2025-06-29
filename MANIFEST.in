@@ -1,0 +1,5 @@
+include README.md
+include LICENSE
+recursive-include go-server *.go *.mod *.sum *.md
+recursive-include htmlnojs *.py
+global-exclude *.pyc __pycache__
