@@ -26,28 +26,119 @@ def create_app_from_registry_map(reg_map: Dict[str, Any], project_dir: pathlib.P
 
     # mount dynamic Python handlers
     for e in python_routes:
-        route = e.get("route")
+        go_route = e.get("route")  # This is "/api/demo/hello"
         fn_name = e.get("function")
-        parts = route.strip("/").split("/")
-        module = parts[1] if len(parts) > 1 else None
+        method = e.get("method")
+
+        # Strip /api/ prefix to match what Go server actually calls
+        fastapi_route = go_route.replace("/api/", "/", 1) if go_route.startswith("/api/") else go_route
+
+        # Extract module name from the stripped route
+        parts = fastapi_route.strip("/").split("/")
+        module = parts[0] if len(parts) > 0 else "demo"  # fallback to demo
+
         file_path = project_dir.joinpath("py_htmx", f"{module}.py")
-        log.debug(f"Mounting Python route {route} -> {fn_name} from {file_path}")
+        log.debug(f"Mounting Python route {go_route} -> FastAPI {fastapi_route} -> {fn_name} from {file_path}")
 
-        spec = importlib.util.spec_from_file_location(
-            pathlib.Path(file_path).stem, file_path.as_posix()
-        )
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-        fn = getattr(mod, fn_name)
+        try:
+            spec = importlib.util.spec_from_file_location(
+                pathlib.Path(file_path).stem, file_path.as_posix()
+            )
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
 
-        async def handler(request: Request, fn=fn):
-            if request.headers.get("content-type", "").startswith("application/json"):
-                data = await request.json()
-            else:
-                data = dict(await request.form())
-            return fn(data)
+            # Check if function exists
+            if not hasattr(mod, fn_name):
+                log.error(f"Function {fn_name} not found in {file_path}")
+                continue
 
-        app.add_api_route(route, handler, methods=[e.get("method")])
+            fn = getattr(mod, fn_name)
+            log.debug(f"Successfully loaded function {fn_name} from {module}.py")
+
+            # Create handler with proper function binding
+            def create_handler(handler_func, func_name):
+                async def handler(request: Request):
+                    try:
+                        log.debug(f"Calling {func_name} with request")
+                        log.debug(f"Content-Type: {request.headers.get('content-type', 'None')}")
+                        log.debug(f"Method: {request.method}")
+
+                        data = {}
+
+                        # Handle different content types
+                        if request.method == "POST":
+                            content_type = request.headers.get("content-type", "")
+                            log.debug(f"POST request with content-type: {content_type}")
+
+                            if content_type.startswith("application/json"):
+                                data = await request.json()
+                                log.debug(f"JSON data: {data}")
+                            elif content_type.startswith("application/x-www-form-urlencoded"):
+                                form_data = await request.form()
+                                data = dict(form_data)
+                                log.debug(f"Form data: {data}")
+
+                                # If form data is empty, try reading raw body
+                                if not data:
+                                    try:
+                                        body = await request.body()
+                                        log.debug(f"Raw body (form empty): {body}")
+                                        if body:
+                                            from urllib.parse import parse_qs
+                                            body_str = body.decode('utf-8')
+                                            log.debug(f"Body string: {body_str}")
+                                            parsed = parse_qs(body_str)
+                                            data = {k: v[0] if v else '' for k, v in parsed.items()}
+                                            log.debug(f"Manually parsed data: {data}")
+                                    except Exception as e:
+                                        log.error(f"Failed to parse raw body: {e}")
+                            else:
+                                # HTMX default form submission
+                                try:
+                                    form_data = await request.form()
+                                    data = dict(form_data)
+                                    log.debug(f"Default form data: {data}")
+                                except Exception as e:
+                                    log.error(f"Failed to parse form data: {e}")
+                                    # Try to read raw body
+                                    body = await request.body()
+                                    log.debug(f"Raw body: {body}")
+                                    if body:
+                                        # Parse form data manually
+                                        from urllib.parse import parse_qs
+                                        body_str = body.decode('utf-8')
+                                        parsed = parse_qs(body_str)
+                                        data = {k: v[0] if v else '' for k, v in parsed.items()}
+                                        log.debug(f"Manually parsed data: {data}")
+                        else:
+                            # GET request - use query parameters
+                            data = dict(request.query_params)
+                            log.debug(f"Query params: {data}")
+
+                        log.debug(f"Final data passed to {func_name}: {data}")
+                        result = handler_func(data)
+
+                        # Return HTML response
+                        from fastapi.responses import HTMLResponse
+                        return HTMLResponse(content=result)
+
+                    except Exception as e:
+                        log.error(f"Error in handler {func_name}: {e}")
+                        return HTMLResponse(
+                            content=f'<div class="alert alert-error"><strong>Error:</strong> {str(e)}</div>',
+                            status_code=500
+                        )
+                return handler
+
+            # Create the handler with proper function binding
+            route_handler = create_handler(fn, fn_name)
+
+            # Mount at the stripped path that Go server actually calls
+            app.add_api_route(fastapi_route, route_handler, methods=[method])
+            log.success(f"Successfully mounted {method} {fastapi_route} -> {fn_name}")
+
+        except Exception as e:
+            log.error(f"Failed to mount route {fastapi_route}: {e}")
 
     # human-readable route map
     @app.get("/_routes", response_class=PlainTextResponse)
@@ -62,7 +153,9 @@ def create_app_from_registry_map(reg_map: Dict[str, Any], project_dir: pathlib.P
             lines.append(f"CSS GET {c.get('route')} -> {c.get('name')} deps={deps}")
         lines.append("")
         for p in python_routes:
-            lines.append(f"PYTHON {p.get('method')} {p.get('route')} -> {p.get('function')}")
+            go_route = p.get('route')
+            fastapi_route = go_route.replace("/api/", "/", 1) if go_route.startswith("/api/") else go_route
+            lines.append(f"PYTHON {p.get('method')} {go_route} -> FastAPI {fastapi_route} -> {p.get('function')}")
         lines.append(f"\nTOTAL ROUTES {reg_map.get('total_routes', len(python_routes))}")
         return "\n".join(lines)
 
@@ -73,7 +166,6 @@ def create_app_from_registry_map(reg_map: Dict[str, Any], project_dir: pathlib.P
         return reg_map
 
     return app
-
 
 class HTMXServer:
     """Runs FastAPI HTMX server in background, waiting on Go server."""

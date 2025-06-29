@@ -1,32 +1,45 @@
+/* buttons.css - Google button style */
 .btn {
-    display: inline-block;
-    padding: 0.75rem 1.5rem;
-    border: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 9px 24px;
+    border: 1px solid var(--border-color);
     border-radius: var(--border-radius);
-    font-size: 1rem;
-    font-weight: 600;
+    font-size: 14px;
+    font-weight: 500;
     text-decoration: none;
     cursor: pointer;
-    transition: all 0.3s ease;
-    margin: 0.25rem;
+    transition: all 0.2s ease;
+    background: white;
+    color: var(--text-color);
+    margin: 4px 8px 4px 0;
+    min-width: 64px;
+}
+
+.btn:hover {
+    box-shadow: 0 1px 2px 0 rgba(60,64,67,.3), 0 1px 3px 1px rgba(60,64,67,.15);
+    background-color: var(--hover-bg);
 }
 
 .btn-primary {
     background-color: var(--primary-color);
     color: white;
+    border-color: var(--primary-color);
 }
 
 .btn-primary:hover {
-    background-color: #2980b9;
-    transform: translateY(-2px);
+    background-color: #1557b0;
+    border-color: #1557b0;
 }
 
 .btn-secondary {
     background-color: var(--secondary-color);
     color: white;
+    border-color: var(--secondary-color);
 }
 
 .btn-secondary:hover {
-    background-color: #27ae60;
-    transform: translateY(-2px);
+    background-color: #2d7d32;
+    border-color: #2d7d32;
 }

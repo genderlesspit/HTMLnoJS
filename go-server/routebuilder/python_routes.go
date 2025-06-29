@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
+	//"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -276,75 +276,94 @@ func (p *PythonRouteBuilder) buildFastAPIPath(basePath, functionName string) str
 
 // createProxyHandler creates an HTTP handler that proxies requests to FastAPI
 func (p *PythonRouteBuilder) createProxyHandler(basePath, functionName string) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		// Build the FastAPI server URL path
-		fastAPIPath := p.buildFastAPIPath(basePath, functionName)
-		targetURL := p.GetFastAPIURL() + fastAPIPath
-		log.Printf("DEBUG: Proxying %s %s -> %s", r.Method, r.URL.Path, targetURL)
+    return func(w http.ResponseWriter, r *http.Request) {
+        // Build the FastAPI server URL path
+        fastAPIPath := p.buildFastAPIPath(basePath, functionName)
+        targetURL := p.GetFastAPIURL() + fastAPIPath
+        log.Printf("DEBUG: Proxying %s %s -> %s", r.Method, r.URL.Path, targetURL)
+        log.Printf("DEBUG: Original Content-Type: %s", r.Header.Get("Content-Type"))
+        log.Printf("DEBUG: Original Content-Length: %s", r.Header.Get("Content-Length"))
 
-		// Read the request body
-		var body io.Reader
-		if r.Body != nil {
-			bodyBytes, err := io.ReadAll(r.Body)
-			if err != nil {
-				http.Error(w, fmt.Sprintf("Failed to read request body: %v", err), http.StatusInternalServerError)
-				return
-			}
-			body = bytes.NewReader(bodyBytes)
-		}
+        // Read the request body
+        var body io.Reader
+        var bodyBytes []byte
+        if r.Body != nil {
+            log.Printf("DEBUG: Reading request body...")
+            var err error
+            bodyBytes, err = io.ReadAll(r.Body)
+            if err != nil {
+                log.Printf("ERROR: Failed to read request body: %v", err)
+                http.Error(w, fmt.Sprintf("Failed to read request body: %v", err), http.StatusInternalServerError)
+                return
+            }
+            body = bytes.NewReader(bodyBytes)
+            log.Printf("DEBUG: Read body of %d bytes: %q", len(bodyBytes), string(bodyBytes))
+        } else {
+            log.Printf("DEBUG: No request body to read")
+        }
 
-		// Create the proxy request
-		proxyReq, err := http.NewRequestWithContext(r.Context(), r.Method, targetURL, body)
-		if err != nil {
-			http.Error(w, fmt.Sprintf("Failed to create proxy request: %v", err), http.StatusInternalServerError)
-			return
-		}
+        // Create the proxy request
+        log.Printf("DEBUG: Creating proxy request...")
+        proxyReq, err := http.NewRequestWithContext(r.Context(), r.Method, targetURL, body)
+        if err != nil {
+            log.Printf("ERROR: Failed to create proxy request: %v", err)
+            http.Error(w, fmt.Sprintf("Failed to create proxy request: %v", err), http.StatusInternalServerError)
+            return
+        }
 
-		// Copy headers from original request (excluding hop-by-hop headers)
-		copyHeaders(r.Header, proxyReq.Header)
+        // Copy headers from original request (excluding hop-by-hop headers)
+        log.Printf("DEBUG: Copying headers...")
+        copyHeaders(r.Header, proxyReq.Header)
 
-		// Copy query parameters
-		if r.URL.RawQuery != "" {
-			proxyReq.URL.RawQuery = r.URL.RawQuery
-		}
+        // Copy query parameters
+        if r.URL.RawQuery != "" {
+            proxyReq.URL.RawQuery = r.URL.RawQuery
+            log.Printf("DEBUG: Copied query parameters: %s", r.URL.RawQuery)
+        }
 
-		// Handle form data for POST requests
-		if r.Method == "POST" && strings.Contains(r.Header.Get("Content-Type"), "application/x-www-form-urlencoded") {
-			if err := r.ParseForm(); err == nil {
-				formData := url.Values(r.PostForm).Encode()
-				proxyReq.Body = io.NopCloser(strings.NewReader(formData))
-				proxyReq.ContentLength = int64(len(formData))
-				proxyReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-			}
-		}
+        // Set content length if we read the body
+        if bodyBytes != nil {
+            proxyReq.ContentLength = int64(len(bodyBytes))
+            log.Printf("DEBUG: Set Content-Length to %d", len(bodyBytes))
+        }
 
-		// Make the request to the FastAPI server
-		resp, err := p.httpClient.Do(proxyReq)
-		if err != nil {
-			// FastAPI server is not available
-			http.Error(w, fmt.Sprintf(`
-				<div class="htmx-error" style="color: red; padding: 10px; border: 1px solid red; border-radius: 4px;">
-					<strong>Service Unavailable</strong><br>
-					The Python handler server is not running on %s<br>
-					<small>Error: %v</small>
-				</div>
-			`, p.GetFastAPIURL(), err), http.StatusServiceUnavailable)
-			return
-		}
-		defer resp.Body.Close()
+        log.Printf("DEBUG: Final proxy request - Method: %s, URL: %s, Content-Length: %d",
+            proxyReq.Method, proxyReq.URL.String(), proxyReq.ContentLength)
+        log.Printf("DEBUG: Final proxy Content-Type: %s", proxyReq.Header.Get("Content-Type"))
 
-		// Copy response headers (excluding hop-by-hop headers)
-		copyHeaders(resp.Header, w.Header())
+        // Make the request to the FastAPI server
+        log.Printf("DEBUG: Sending request to FastAPI...")
+        resp, err := p.httpClient.Do(proxyReq)
+        if err != nil {
+            log.Printf("ERROR: FastAPI request failed: %v", err)
+            // FastAPI server is not available
+            http.Error(w, fmt.Sprintf(`
+                <div class="htmx-error" style="color: red; padding: 10px; border: 1px solid red; border-radius: 4px;">
+                    <strong>Service Unavailable</strong><br>
+                    The Python handler server is not running on %s<br>
+                    <small>Error: %v</small>
+                </div>
+            `, p.GetFastAPIURL(), err), http.StatusServiceUnavailable)
+            return
+        }
+        defer resp.Body.Close()
 
-		// Copy status code
-		w.WriteHeader(resp.StatusCode)
+        log.Printf("DEBUG: FastAPI responded with status: %d", resp.StatusCode)
 
-		// Copy response body
-		if _, err := io.Copy(w, resp.Body); err != nil {
-			// Log the error but don't send another response since headers are already sent
-			fmt.Printf("Error copying response body from FastAPI: %v\n", err)
-		}
-	}
+        // Copy response headers (excluding hop-by-hop headers)
+        copyHeaders(resp.Header, w.Header())
+
+        // Copy status code
+        w.WriteHeader(resp.StatusCode)
+
+        // Copy response body
+        if _, err := io.Copy(w, resp.Body); err != nil {
+            // Log the error but don't send another response since headers are already sent
+            log.Printf("ERROR: Failed to copy response body from FastAPI: %v", err)
+        } else {
+            log.Printf("DEBUG: Successfully copied response body to client")
+        }
+    }
 }
 
 // copyHeaders copies HTTP headers, excluding hop-by-hop headers

@@ -1,37 +1,33 @@
-# Contact form handlers
-
+# contact.py - Fixed handlers
 def htmx_send(request):
     """
-    @rate_limit(5)
     Handle contact form submission
     Validates and processes contact form data
     """
-    name = request.get('name', '')
-    email = request.get('email', '')
-    message = request.get('message', '')
+    try:
+        name = request.get('name', '').strip()
+        email = request.get('email', '').strip()
+        message = request.get('message', '').strip()
 
-    if not all([name, email, message]):
-        return '''
-        <div class="alert alert-error">
-            <strong>Error:</strong> All fields are required!
+        if not name:
+            return '<div class="alert alert-error"><strong>Error:</strong> Name is required!</div>'
+        if not email:
+            return '<div class="alert alert-error"><strong>Error:</strong> Email is required!</div>'
+        if not message:
+            return '<div class="alert alert-error"><strong>Error:</strong> Message is required!</div>'
+        if '@' not in email:
+            return '<div class="alert alert-error"><strong>Error:</strong> Please enter a valid email!</div>'
+
+        return f'''
+        <div class="alert alert-success">
+            <strong>Thank you, {name}!</strong><br>
+            Your message has been received. We'll get back to you at {email} soon!<br>
+            <small>✅ Message sent successfully via HTMLnoJS</small>
         </div>
         '''
-
-    return f'''
-    <div class="alert alert-success">
-        <h3>Thank you, {name}!</h3>
-        <p>Your message has been received. We'll get back to you at <strong>{email}</strong> soon!</p>
-        <small>✅ Message sent successfully via HTMLnoJS</small>
-    </div>
-    '''
-
-def htmx_validate_email(request):
-    """
-    Real-time email validation
-    """
-    email = request.get('email', '')
-
-    if '@' not in email or '.' not in email:
-        return '<small class="error">Please enter a valid email address</small>'
-
-    return '<small class="success">✓ Valid email address</small>'
+    except Exception as e:
+        return f'''
+        <div class="alert alert-error">
+            <strong>Error:</strong> {str(e)}
+        </div>
+        '''

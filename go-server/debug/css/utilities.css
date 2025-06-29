@@ -1,42 +1,93 @@
+/* utilities.css - Clean utilities */
 .result-box {
-    margin-top: 1rem;
-    padding: 1rem;
+    margin-top: 16px;
+    padding: 16px;
     border-radius: var(--border-radius);
-    min-height: 50px;
-    background-color: #f8f9fa;
-    border-left: 4px solid var(--primary-color);
+    background-color: var(--hover-bg);
+    border: 1px solid var(--border-color);
+    min-height: 48px;
+    font-size: 14px;
 }
 
 .nav {
     display: flex;
-    gap: 1rem;
-    margin-top: 1rem;
+    gap: 8px;
+    margin-top: 24px;
 }
 
 .nav-link {
     color: var(--primary-color);
     text-decoration: none;
-    font-weight: 600;
-    padding: 0.5rem 1rem;
+    font-weight: 500;
+    padding: 8px 16px;
     border-radius: var(--border-radius);
-    transition: background-color 0.3s ease;
+    transition: background-color 0.2s ease;
+    font-size: 14px;
 }
 
 .nav-link:hover {
-    background-color: rgba(52, 152, 219, 0.1);
+    background-color: var(--hover-bg);
 }
 
 .features ul {
     list-style: none;
-    padding-left: 0;
+    padding: 0;
 }
 
 .features li {
-    padding: 0.5rem 0;
-    border-bottom: 1px solid #eee;
+    padding: 8px 0;
+    font-size: 14px;
+    color: var(--text-color);
 }
 
 .text {
-    margin-bottom: 1.5rem;
-    line-height: 1.7;
+    margin-bottom: 24px;
+    color: var(--text-secondary);
+}
+
+.alert {
+    padding: 12px 16px;
+    border-radius: var(--border-radius);
+    margin: 16px 0;
+    font-size: 14px;
+}
+
+.alert-success {
+    background-color: #e8f5e8;
+    color: #1e4620;
+    border: 1px solid #c8e6c9;
+}
+
+.alert-info {
+    background-color: #e3f2fd;
+    color: #0d47a1;
+    border: 1px solid #bbdefb;
+}
+
+.alert-error {
+    background-color: #ffebee;
+    color: #c62828;
+    border: 1px solid #ffcdd2;
+}
+
+.timestamp {
+    font-family: 'Courier New', monospace;
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+
+.info-box {
+    background: var(--hover-bg);
+    padding: 16px;
+    border-radius: var(--border-radius);
+    border: 1px solid var(--border-color);
+}
+
+.info-box code {
+    background: #f1f3f4;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 12px;
+    color: var(--text-color);
+    word-break: break-all;
 }
