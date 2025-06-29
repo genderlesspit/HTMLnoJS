@@ -165,54 +165,47 @@ func (s *Server) wrapHandler(handler http.HandlerFunc, requiresAuth bool) http.H
 		wrapped = s.middleware[i](wrapped)
 	}
 
-	// Convert back to HandlerFunc
 	return func(w http.ResponseWriter, r *http.Request) {
 		wrapped.ServeHTTP(w, r)
 	}
 }
 
 func (s *Server) wrapStaticHandler(handler http.HandlerFunc) http.HandlerFunc {
-	wrapped := http.Handler(handler)
+	wrapped := handler
 
 	// Apply static file middleware (caching, compression)
-	wrapped = http.HandlerFunc(s.staticMiddleware(handler))
+	wrapped = s.staticMiddleware(wrapped)
 
 	// Apply CORS if enabled
 	if s.config.EnableCORS {
-		wrapped = http.HandlerFunc(s.corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
-			wrapped.ServeHTTP(w, r)
-		}))
+		wrapped = s.corsMiddleware(wrapped)
 	}
 
-	return func(w http.ResponseWriter, r *http.Request) {
-		wrapped.ServeHTTP(w, r)
-	}
+	return wrapped
 }
 
 func (s *Server) wrapAPIHandler(handler http.HandlerFunc, requiresAuth bool, rateLimit int, cacheTimeout int) http.HandlerFunc {
-	wrapped := http.Handler(handler)
+	wrapped := handler
 
 	// Apply caching if configured
 	if cacheTimeout > 0 {
-		wrapped = http.HandlerFunc(s.cacheMiddleware(handler, cacheTimeout))
+		wrapped = s.cacheMiddleware(wrapped, cacheTimeout)
 	}
 
 	// Apply rate limiting if configured
 	if rateLimit > 0 {
-		wrapped = http.HandlerFunc(s.rateLimitMiddleware(handler, rateLimit))
+		wrapped = s.rateLimitMiddleware(wrapped, rateLimit)
 	}
 
 	// Apply authentication if required
 	if requiresAuth {
-		wrapped = http.HandlerFunc(s.authMiddleware(handler))
+		wrapped = s.authMiddleware(wrapped)
 	}
 
 	// Apply API middleware (JSON handling, CORS, etc.)
-	wrapped = http.HandlerFunc(s.apiMiddleware(handler))
+	wrapped = s.apiMiddleware(wrapped)
 
-	return func(w http.ResponseWriter, r *http.Request) {
-		wrapped.ServeHTTP(w, r)
-	}
+	return wrapped
 }
 
 // Start starts the HTTP server

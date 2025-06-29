@@ -1,13 +1,16 @@
 package routebuilder
 
 import (
-	//"bufio"
+	"bytes"
 	"fmt"
+	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 )
 
 type PythonRoute struct {
@@ -27,16 +30,32 @@ type PythonRoute struct {
 }
 
 type PythonRouteBuilder struct {
-	pyHTMXDir string
-	routes    []PythonRoute
+	pyHTMXDir    string
+	routes       []PythonRoute
+	htmxServerURL string
+	httpClient   *http.Client
 }
 
 // NewPythonRouteBuilder creates a new Python HTMX route builder
 func NewPythonRouteBuilder(pyHTMXDir string) *PythonRouteBuilder {
 	return &PythonRouteBuilder{
-		pyHTMXDir: pyHTMXDir,
-		routes:    make([]PythonRoute, 0),
+		pyHTMXDir:     pyHTMXDir,
+		routes:        make([]PythonRoute, 0),
+		htmxServerURL: "http://127.0.0.1:8081", // Default HTMX server URL
+		httpClient: &http.Client{
+			Timeout: 30 * time.Second,
+			Transport: &http.Transport{
+				MaxIdleConns:        10,
+				IdleConnTimeout:     30 * time.Second,
+				DisableCompression:  false,
+			},
+		},
 	}
+}
+
+// SetHTMXServerURL sets the URL for the HTMX server
+func (p *PythonRouteBuilder) SetHTMXServerURL(url string) {
+	p.htmxServerURL = strings.TrimSuffix(url, "/")
 }
 
 // BuildRoutes discovers and builds Python HTMX routes
@@ -202,7 +221,7 @@ func (p *PythonRouteBuilder) buildPythonRoute(filePath, basePath string, functio
 		FilePath:       filePath,
 		Route:          routePath,
 		Method:         method,
-		Handler:        p.createPythonHandler(filePath, function.Name),
+		Handler:        p.createPythonHandler(basePath, function.Name),
 		Function:       function.Name,
 		Parameters:     function.Parameters,
 		ReturnType:     function.ReturnType,
@@ -270,17 +289,95 @@ func (p *PythonRouteBuilder) extractCacheTimeout(doc string) int {
 	return 0 // No cache
 }
 
-func (p *PythonRouteBuilder) createPythonHandler(filePath, functionName string) http.HandlerFunc {
+// createPythonHandler creates an HTTP handler that proxies requests to the HTMX server
+func (p *PythonRouteBuilder) createPythonHandler(basePath, functionName string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// TODO: Implement Python function execution
-		// This would involve:
-		// 1. Execute Python script with the specific function
-		// 2. Pass HTTP request data to Python function
-		// 3. Return the HTML fragment response
+		// Build the HTMX server URL path
+		var htmxPath string
+		routeName := strings.TrimPrefix(functionName, "htmx_")
 
-		w.Header().Set("Content-Type", "text/html")
-		fmt.Fprintf(w, "<!-- Python Handler: %s:%s -->", filePath, functionName)
-		fmt.Fprintf(w, "<div>HTMX Response from %s</div>", functionName)
+		if basePath == "" || basePath == "." {
+			htmxPath = fmt.Sprintf("/%s", routeName)
+		} else {
+			htmxPath = fmt.Sprintf("/%s/%s", basePath, routeName)
+		}
+
+		// Create the full URL to the HTMX server
+		targetURL := p.htmxServerURL + htmxPath
+
+		// Create a new request to the HTMX server
+		var body io.Reader
+		if r.Body != nil {
+			bodyBytes, err := io.ReadAll(r.Body)
+			if err != nil {
+				http.Error(w, fmt.Sprintf("Failed to read request body: %v", err), http.StatusInternalServerError)
+				return
+			}
+			body = bytes.NewReader(bodyBytes)
+		}
+
+		// Create the proxy request
+		proxyReq, err := http.NewRequestWithContext(r.Context(), r.Method, targetURL, body)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to create proxy request: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		// Copy headers from original request
+		p.copyHeaders(r.Header, proxyReq.Header)
+
+		// Copy query parameters
+		if r.URL.RawQuery != "" {
+			proxyReq.URL.RawQuery = r.URL.RawQuery
+		}
+
+		// Add form data for POST requests
+		if r.Method == "POST" && r.Header.Get("Content-Type") == "application/x-www-form-urlencoded" {
+			if err := r.ParseForm(); err == nil {
+				proxyReq.PostForm = r.PostForm
+				// Re-encode form data
+				proxyReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+				formData := url.Values(r.PostForm).Encode()
+				proxyReq.Body = io.NopCloser(strings.NewReader(formData))
+				proxyReq.ContentLength = int64(len(formData))
+			}
+		}
+
+		// Make the request to the HTMX server
+		resp, err := p.httpClient.Do(proxyReq)
+		if err != nil {
+			// If HTMX server is not available, return an error message
+			http.Error(w, fmt.Sprintf("HTMX server unavailable: %v", err), http.StatusServiceUnavailable)
+			return
+		}
+		defer resp.Body.Close()
+
+		// Copy response headers
+		p.copyHeaders(resp.Header, w.Header())
+
+		// Copy status code
+		w.WriteHeader(resp.StatusCode)
+
+		// Copy response body
+		if _, err := io.Copy(w, resp.Body); err != nil {
+			// Log the error but don't send another response since headers are already sent
+			fmt.Printf("Error copying response body: %v\n", err)
+		}
+	}
+}
+
+// copyHeaders copies HTTP headers from source to destination
+func (p *PythonRouteBuilder) copyHeaders(src, dst http.Header) {
+	for key, values := range src {
+		// Skip certain headers that shouldn't be copied
+		switch strings.ToLower(key) {
+		case "connection", "transfer-encoding", "upgrade":
+			continue
+		}
+
+		for _, value := range values {
+			dst.Add(key, value)
+		}
 	}
 }
 
@@ -339,4 +436,26 @@ func (p *PythonRouteBuilder) GetAuthenticatedRoutes() []PythonRoute {
 		}
 	}
 	return matches
+}
+
+// Health check for HTMX server connectivity
+func (p *PythonRouteBuilder) CheckHTMXServerHealth() error {
+	healthURL := p.htmxServerURL + "/health"
+
+	req, err := http.NewRequest("GET", healthURL, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create health check request: %w", err)
+	}
+
+	resp, err := p.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("HTMX server health check failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("HTMX server returned status %d", resp.StatusCode)
+	}
+
+	return nil
 }
