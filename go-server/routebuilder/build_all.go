@@ -30,24 +30,26 @@ type AllRoutesBuilder struct {
 	templatesDir string
 	cssDir       string
 	pyHTMXDir    string
+	fastAPIPort  int
 	Collection   RouteCollection
 }
 
 // NewAllRoutesBuilder creates a unified route builder
-func NewAllRoutesBuilder(templatesDir, cssDir, pyHTMXDir string) *AllRoutesBuilder {
-	return &AllRoutesBuilder{
-		templatesDir: templatesDir,
-		cssDir:       cssDir,
-		pyHTMXDir:    pyHTMXDir,
-		Collection: RouteCollection{
-			HTMLRoutes:   make([]HTMLRoute, 0),
-			CSSRoutes:    make([]CSSRoute, 0),
-			PythonRoutes: make([]PythonRoute, 0),
-			Metadata: RouteMetadata{
-				Dependencies: make(map[string][]string),
-			},
-		},
-	}
+func NewAllRoutesBuilder(templatesDir, cssDir, pyHTMXDir string, fastAPIPort int) *AllRoutesBuilder {
+    return &AllRoutesBuilder{
+        templatesDir: templatesDir,
+        cssDir:       cssDir,
+        pyHTMXDir:    pyHTMXDir,
+        fastAPIPort:  fastAPIPort,
+        Collection: RouteCollection {
+            HTMLRoutes:   []HTMLRoute{},
+            CSSRoutes:    []CSSRoute{},
+            PythonRoutes: []PythonRoute{},
+            Metadata: RouteMetadata{
+                Dependencies: map[string][]string{},
+            },
+        },
+    }
 }
 
 // BuildAllRoutes orchestrates building all route types
@@ -101,6 +103,7 @@ func (a *AllRoutesBuilder) buildPythonRoutes(pythonFiles []string) error {
 	log.Printf("Building Python routes from %d files...", len(pythonFiles))
 
 	pythonBuilder := NewPythonRouteBuilder(a.pyHTMXDir)
+	pythonBuilder.SetFastAPIServer("localhost", a.fastAPIPort)
 	routes, err := pythonBuilder.BuildRoutes(pythonFiles)
 	if err != nil {
 		return err

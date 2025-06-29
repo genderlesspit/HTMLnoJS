@@ -40,6 +40,7 @@ setup(
         "fastapi>=0.68.0",
         "uvicorn[standard]>=0.15.0",
         "aiohttp>=3.8.0",
+        "loguru>=0.6.0",
     ],
 
     extras_require={

@@ -30,32 +30,40 @@ type PythonRoute struct {
 }
 
 type PythonRouteBuilder struct {
-	pyHTMXDir    string
-	routes       []PythonRoute
-	htmxServerURL string
-	httpClient   *http.Client
+	pyHTMXDir     string
+	routes        []PythonRoute
+	fastAPIHost   string
+	fastAPIPort   int
+	httpClient    *http.Client
 }
 
 // NewPythonRouteBuilder creates a new Python HTMX route builder
 func NewPythonRouteBuilder(pyHTMXDir string) *PythonRouteBuilder {
 	return &PythonRouteBuilder{
-		pyHTMXDir:     pyHTMXDir,
-		routes:        make([]PythonRoute, 0),
-		htmxServerURL: "http://127.0.0.1:8081", // Default HTMX server URL
+		pyHTMXDir:   pyHTMXDir,
+		routes:      make([]PythonRoute, 0),
+		fastAPIHost: "localhost",
+		fastAPIPort: 8081, // Default FastAPI port
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 			Transport: &http.Transport{
-				MaxIdleConns:        10,
-				IdleConnTimeout:     30 * time.Second,
-				DisableCompression:  false,
+				MaxIdleConns:       10,
+				IdleConnTimeout:    30 * time.Second,
+				DisableCompression: false,
 			},
 		},
 	}
 }
 
-// SetHTMXServerURL sets the URL for the HTMX server
-func (p *PythonRouteBuilder) SetHTMXServerURL(url string) {
-	p.htmxServerURL = strings.TrimSuffix(url, "/")
+// SetFastAPIServer sets the FastAPI server host and port
+func (p *PythonRouteBuilder) SetFastAPIServer(host string, port int) {
+	p.fastAPIHost = host
+	p.fastAPIPort = port
+}
+
+// GetFastAPIURL returns the FastAPI server URL
+func (p *PythonRouteBuilder) GetFastAPIURL() string {
+	return fmt.Sprintf("http://%s:%d", p.fastAPIHost, p.fastAPIPort)
 }
 
 // BuildRoutes discovers and builds Python HTMX routes
@@ -193,12 +201,12 @@ func (p *PythonRouteBuilder) buildPythonRoute(filePath, basePath string, functio
 	// Remove htmx_ prefix for route name
 	routeName := strings.TrimPrefix(function.Name, "htmx_")
 
-	// Build API route path
-	var routePath string
+	// Build API route path - this is what the Go server will expose
+	var goRoutePath string
 	if basePath == "" || basePath == "." {
-		routePath = "/api/" + routeName
+		goRoutePath = "/api/" + routeName
 	} else {
-		routePath = "/api/" + basePath + "/" + routeName
+		goRoutePath = "/api/" + basePath + "/" + routeName
 	}
 
 	// Determine HTTP method based on function name patterns
@@ -210,29 +218,137 @@ func (p *PythonRouteBuilder) buildPythonRoute(filePath, basePath string, functio
 	cacheTimeout := p.extractCacheTimeout(function.Documentation)
 
 	metadata := map[string]interface{}{
-		"file":        filePath,
-		"base_path":   basePath,
-		"parameters":  function.Parameters,
-		"return_type": function.ReturnType,
+		"file":         filePath,
+		"base_path":    basePath,
+		"parameters":   function.Parameters,
+		"return_type":  function.ReturnType,
+		"fastapi_url":  p.GetFastAPIURL(),
+		"fastapi_path": p.buildFastAPIPath(basePath, function.Name),
 	}
 
 	route := PythonRoute{
-		Name:           routeName,
-		FilePath:       filePath,
-		Route:          routePath,
-		Method:         method,
-		Handler:        p.createPythonHandler(basePath, function.Name),
-		Function:       function.Name,
-		Parameters:     function.Parameters,
-		ReturnType:     function.ReturnType,
-		RequiresAuth:   requiresAuth,
-		RateLimit:      rateLimit,
-		CacheTimeout:   cacheTimeout,
-		Documentation:  function.Documentation,
-		Metadata:       metadata,
+		Name:          routeName,
+		FilePath:      filePath,
+		Route:         goRoutePath,
+		Method:        method,
+		Handler:       p.createProxyHandler(basePath, function.Name),
+		Function:      function.Name,
+		Parameters:    function.Parameters,
+		ReturnType:    function.ReturnType,
+		RequiresAuth:  requiresAuth,
+		RateLimit:     rateLimit,
+		CacheTimeout:  cacheTimeout,
+		Documentation: function.Documentation,
+		Metadata:      metadata,
 	}
 
 	return route
+}
+
+// buildFastAPIPath creates the path that will be sent to the FastAPI server
+func (p *PythonRouteBuilder) buildFastAPIPath(basePath, functionName string) string {
+	routeName := strings.TrimPrefix(functionName, "htmx_")
+
+	if basePath == "" || basePath == "." {
+		return fmt.Sprintf("/%s", routeName)
+	} else {
+		return fmt.Sprintf("/%s/%s", basePath, routeName)
+	}
+}
+
+// createProxyHandler creates an HTTP handler that proxies requests to FastAPI
+func (p *PythonRouteBuilder) createProxyHandler(basePath, functionName string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Build the FastAPI server URL path
+		fastAPIPath := p.buildFastAPIPath(basePath, functionName)
+		targetURL := p.GetFastAPIURL() + fastAPIPath
+
+		// Read the request body
+		var body io.Reader
+		if r.Body != nil {
+			bodyBytes, err := io.ReadAll(r.Body)
+			if err != nil {
+				http.Error(w, fmt.Sprintf("Failed to read request body: %v", err), http.StatusInternalServerError)
+				return
+			}
+			body = bytes.NewReader(bodyBytes)
+		}
+
+		// Create the proxy request
+		proxyReq, err := http.NewRequestWithContext(r.Context(), r.Method, targetURL, body)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to create proxy request: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		// Copy headers from original request (excluding hop-by-hop headers)
+		copyHeaders(r.Header, proxyReq.Header)
+
+		// Copy query parameters
+		if r.URL.RawQuery != "" {
+			proxyReq.URL.RawQuery = r.URL.RawQuery
+		}
+
+		// Handle form data for POST requests
+		if r.Method == "POST" && strings.Contains(r.Header.Get("Content-Type"), "application/x-www-form-urlencoded") {
+			if err := r.ParseForm(); err == nil {
+				formData := url.Values(r.PostForm).Encode()
+				proxyReq.Body = io.NopCloser(strings.NewReader(formData))
+				proxyReq.ContentLength = int64(len(formData))
+				proxyReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			}
+		}
+
+		// Make the request to the FastAPI server
+		resp, err := p.httpClient.Do(proxyReq)
+		if err != nil {
+			// FastAPI server is not available
+			http.Error(w, fmt.Sprintf(`
+				<div class="htmx-error" style="color: red; padding: 10px; border: 1px solid red; border-radius: 4px;">
+					<strong>Service Unavailable</strong><br>
+					The Python handler server is not running on %s<br>
+					<small>Error: %v</small>
+				</div>
+			`, p.GetFastAPIURL(), err), http.StatusServiceUnavailable)
+			return
+		}
+		defer resp.Body.Close()
+
+		// Copy response headers (excluding hop-by-hop headers)
+		copyHeaders(resp.Header, w.Header())
+
+		// Copy status code
+		w.WriteHeader(resp.StatusCode)
+
+		// Copy response body
+		if _, err := io.Copy(w, resp.Body); err != nil {
+			// Log the error but don't send another response since headers are already sent
+			fmt.Printf("Error copying response body from FastAPI: %v\n", err)
+		}
+	}
+}
+
+// copyHeaders copies HTTP headers, excluding hop-by-hop headers
+func copyHeaders(src, dst http.Header) {
+	// Hop-by-hop headers that shouldn't be copied
+	hopByHopHeaders := map[string]bool{
+		"connection":          true,
+		"keep-alive":          true,
+		"proxy-authenticate":  true,
+		"proxy-authorization": true,
+		"te":                  true,
+		"trailers":            true,
+		"transfer-encoding":   true,
+		"upgrade":             true,
+	}
+
+	for key, values := range src {
+		if !hopByHopHeaders[strings.ToLower(key)] {
+			for _, value := range values {
+				dst.Add(key, value)
+			}
+		}
+	}
 }
 
 func (p *PythonRouteBuilder) determineHTTPMethod(functionName string) string {
@@ -255,12 +371,11 @@ func (p *PythonRouteBuilder) determineHTTPMethod(functionName string) string {
 func (p *PythonRouteBuilder) checkRequiresAuth(doc string) bool {
 	doc = strings.ToLower(doc)
 	return strings.Contains(doc, "@auth") ||
-		   strings.Contains(doc, "requires auth") ||
-		   strings.Contains(doc, "login required")
+		strings.Contains(doc, "requires auth") ||
+		strings.Contains(doc, "login required")
 }
 
 func (p *PythonRouteBuilder) extractRateLimit(doc string) int {
-	// Look for @rate_limit(n) or similar patterns
 	rateRegex := regexp.MustCompile(`@rate_limit\((\d+)\)|rate.limit[:\s]+(\d+)`)
 	matches := rateRegex.FindStringSubmatch(doc)
 	if len(matches) > 1 {
@@ -271,11 +386,10 @@ func (p *PythonRouteBuilder) extractRateLimit(doc string) int {
 			return parseInt(matches[2])
 		}
 	}
-	return 0 // No rate limit
+	return 0
 }
 
 func (p *PythonRouteBuilder) extractCacheTimeout(doc string) int {
-	// Look for @cache(n) or similar patterns
 	cacheRegex := regexp.MustCompile(`@cache\((\d+)\)|cache[:\s]+(\d+)`)
 	matches := cacheRegex.FindStringSubmatch(doc)
 	if len(matches) > 1 {
@@ -286,99 +400,7 @@ func (p *PythonRouteBuilder) extractCacheTimeout(doc string) int {
 			return parseInt(matches[2])
 		}
 	}
-	return 0 // No cache
-}
-
-// createPythonHandler creates an HTTP handler that proxies requests to the HTMX server
-func (p *PythonRouteBuilder) createPythonHandler(basePath, functionName string) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		// Build the HTMX server URL path
-		var htmxPath string
-		routeName := strings.TrimPrefix(functionName, "htmx_")
-
-		if basePath == "" || basePath == "." {
-			htmxPath = fmt.Sprintf("/%s", routeName)
-		} else {
-			htmxPath = fmt.Sprintf("/%s/%s", basePath, routeName)
-		}
-
-		// Create the full URL to the HTMX server
-		targetURL := p.htmxServerURL + htmxPath
-
-		// Create a new request to the HTMX server
-		var body io.Reader
-		if r.Body != nil {
-			bodyBytes, err := io.ReadAll(r.Body)
-			if err != nil {
-				http.Error(w, fmt.Sprintf("Failed to read request body: %v", err), http.StatusInternalServerError)
-				return
-			}
-			body = bytes.NewReader(bodyBytes)
-		}
-
-		// Create the proxy request
-		proxyReq, err := http.NewRequestWithContext(r.Context(), r.Method, targetURL, body)
-		if err != nil {
-			http.Error(w, fmt.Sprintf("Failed to create proxy request: %v", err), http.StatusInternalServerError)
-			return
-		}
-
-		// Copy headers from original request
-		p.copyHeaders(r.Header, proxyReq.Header)
-
-		// Copy query parameters
-		if r.URL.RawQuery != "" {
-			proxyReq.URL.RawQuery = r.URL.RawQuery
-		}
-
-		// Add form data for POST requests
-		if r.Method == "POST" && r.Header.Get("Content-Type") == "application/x-www-form-urlencoded" {
-			if err := r.ParseForm(); err == nil {
-				proxyReq.PostForm = r.PostForm
-				// Re-encode form data
-				proxyReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-				formData := url.Values(r.PostForm).Encode()
-				proxyReq.Body = io.NopCloser(strings.NewReader(formData))
-				proxyReq.ContentLength = int64(len(formData))
-			}
-		}
-
-		// Make the request to the HTMX server
-		resp, err := p.httpClient.Do(proxyReq)
-		if err != nil {
-			// If HTMX server is not available, return an error message
-			http.Error(w, fmt.Sprintf("HTMX server unavailable: %v", err), http.StatusServiceUnavailable)
-			return
-		}
-		defer resp.Body.Close()
-
-		// Copy response headers
-		p.copyHeaders(resp.Header, w.Header())
-
-		// Copy status code
-		w.WriteHeader(resp.StatusCode)
-
-		// Copy response body
-		if _, err := io.Copy(w, resp.Body); err != nil {
-			// Log the error but don't send another response since headers are already sent
-			fmt.Printf("Error copying response body: %v\n", err)
-		}
-	}
-}
-
-// copyHeaders copies HTTP headers from source to destination
-func (p *PythonRouteBuilder) copyHeaders(src, dst http.Header) {
-	for key, values := range src {
-		// Skip certain headers that shouldn't be copied
-		switch strings.ToLower(key) {
-		case "connection", "transfer-encoding", "upgrade":
-			continue
-		}
-
-		for _, value := range values {
-			dst.Add(key, value)
-		}
-	}
+	return 0
 }
 
 // Helper types and functions
@@ -390,7 +412,6 @@ type FunctionInfo struct {
 }
 
 func parseInt(s string) int {
-	// Simple integer parsing, returns 0 on error
 	result := 0
 	for _, r := range s {
 		if r >= '0' && r <= '9' {
@@ -400,12 +421,33 @@ func parseInt(s string) int {
 	return result
 }
 
-// GetRoutes returns all built Python routes
+// Health check for FastAPI server connectivity
+func (p *PythonRouteBuilder) CheckFastAPIHealth() error {
+	healthURL := p.GetFastAPIURL() + "/health"
+
+	req, err := http.NewRequest("GET", healthURL, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create health check request: %w", err)
+	}
+
+	resp, err := p.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("FastAPI server health check failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("FastAPI server returned status %d", resp.StatusCode)
+	}
+
+	return nil
+}
+
+// Utility methods
 func (p *PythonRouteBuilder) GetRoutes() []PythonRoute {
 	return p.routes
 }
 
-// GetRoutesByMethod returns routes filtered by HTTP method
 func (p *PythonRouteBuilder) GetRoutesByMethod(method string) []PythonRoute {
 	var matches []PythonRoute
 	for _, route := range p.routes {
@@ -416,18 +458,6 @@ func (p *PythonRouteBuilder) GetRoutesByMethod(method string) []PythonRoute {
 	return matches
 }
 
-// GetRoutesByFile returns routes from a specific file
-func (p *PythonRouteBuilder) GetRoutesByFile(filePath string) []PythonRoute {
-	var matches []PythonRoute
-	for _, route := range p.routes {
-		if route.FilePath == filePath {
-			matches = append(matches, route)
-		}
-	}
-	return matches
-}
-
-// GetAuthenticatedRoutes returns routes that require authentication
 func (p *PythonRouteBuilder) GetAuthenticatedRoutes() []PythonRoute {
 	var matches []PythonRoute
 	for _, route := range p.routes {
@@ -436,26 +466,4 @@ func (p *PythonRouteBuilder) GetAuthenticatedRoutes() []PythonRoute {
 		}
 	}
 	return matches
-}
-
-// Health check for HTMX server connectivity
-func (p *PythonRouteBuilder) CheckHTMXServerHealth() error {
-	healthURL := p.htmxServerURL + "/health"
-
-	req, err := http.NewRequest("GET", healthURL, nil)
-	if err != nil {
-		return fmt.Errorf("failed to create health check request: %w", err)
-	}
-
-	resp, err := p.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("HTMX server health check failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("HTMX server returned status %d", resp.StatusCode)
-	}
-
-	return nil
 }

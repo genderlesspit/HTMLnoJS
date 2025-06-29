@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+	"encoding/json"
 
 	"htmlnojs/routebuilder"
 )
@@ -146,11 +147,68 @@ func (s *Server) registerBuiltinRoutes() {
 		fmt.Fprintf(w, "\nSUMMARY: %d total routes\n", s.routes.Metadata.TotalRoutes)
 	})
 
+    s.mux.HandleFunc("/_routes.json", func(w http.ResponseWriter, r *http.Request) {
+        if s.routes == nil {
+            http.Error(w, "No routes loaded", http.StatusInternalServerError)
+            return
+        }
+        w.Header().Set("Content-Type", "application/json")
+
+        // slim payload with only exported fields
+        type jr struct {
+            Method      string   `json:"method,omitempty"`
+            Route       string   `json:"route"`
+            Name        string   `json:"name,omitempty"`
+            Function    string   `json:"function,omitempty"`
+            Deps        []string `json:"dependencies,omitempty"`
+            Auth        bool     `json:"requires_auth,omitempty"`
+        }
+        var out struct {
+            HTML   []jr `json:"html_routes"`
+            CSS    []jr `json:"css_routes"`
+            Python []jr `json:"python_routes"`
+            Total  int  `json:"total_routes"`
+        }
+
+        for _, h := range s.routes.HTMLRoutes {
+            out.HTML = append(out.HTML, jr{
+                Method: h.Method,
+                Route:  h.Route,
+                Name:   h.Name,
+                Auth:   h.RequiresAuth,
+            })
+        }
+        for _, c := range s.routes.CSSRoutes {
+            out.CSS = append(out.CSS, jr{
+                Method: c.Method,
+                Route:  c.Route,
+                Name:   c.Name,
+                Deps:   c.Dependencies,
+            })
+        }
+        for _, p := range s.routes.PythonRoutes {
+            out.Python = append(out.Python, jr{
+                Method:   p.Method,
+                Route:    p.Route,
+                Function: p.Function,
+                Auth:     p.RequiresAuth,
+            })
+        }
+        out.Total = s.routes.Metadata.TotalRoutes
+
+        // log the exact error if encode blows up
+        if err := json.NewEncoder(w).Encode(out); err != nil {
+            log.Printf("❌ JSON encode error: %v", err)
+            http.Error(w, "failed to encode JSON: "+err.Error(), http.StatusInternalServerError)
+        }
+    })
+
 	// Metrics endpoint (if enabled)
 	if s.config.EnableMetrics {
 		s.mux.HandleFunc("/_metrics", s.handleMetrics)
 	}
 }
+
 
 func (s *Server) wrapHandler(handler http.HandlerFunc, requiresAuth bool) http.HandlerFunc {
 	wrapped := http.Handler(handler)

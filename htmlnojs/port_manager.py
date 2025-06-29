@@ -38,7 +38,7 @@ class PortManager:
             return False
 
     @staticmethod
-    def allocate_port_pair(start_port: int = 8080) -> Tuple[int, int]:
+    def allocate_port_pair(start_port: int = 3000) -> Tuple[int, int]:
         """Allocate a pair of consecutive ports"""
         ports = PortManager.find_available_ports(start_port, 2)
         if len(ports) < 2:
