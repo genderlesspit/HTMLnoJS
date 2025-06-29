@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"log"
 )
 
 type PythonRoute struct {
@@ -198,8 +199,9 @@ func (p *PythonRouteBuilder) extractDocstring(content, functionName string) stri
 }
 
 func (p *PythonRouteBuilder) buildPythonRoute(filePath, basePath string, function FunctionInfo) PythonRoute {
-	// Remove htmx_ prefix for route name
-	routeName := strings.TrimPrefix(function.Name, "htmx_")
+	// Extract HTTP method and clean route name from function name
+	method := p.determineHTTPMethod(function.Name)
+	routeName := p.extractRouteName(function.Name)
 
 	// Build API route path - this is what the Go server will expose
 	var goRoutePath string
@@ -208,9 +210,6 @@ func (p *PythonRouteBuilder) buildPythonRoute(filePath, basePath string, functio
 	} else {
 		goRoutePath = "/api/" + basePath + "/" + routeName
 	}
-
-	// Determine HTTP method based on function name patterns
-	method := p.determineHTTPMethod(function.Name)
 
 	// Check for special attributes
 	requiresAuth := p.checkRequiresAuth(function.Documentation)
@@ -242,7 +241,26 @@ func (p *PythonRouteBuilder) buildPythonRoute(filePath, basePath string, functio
 		Metadata:      metadata,
 	}
 
+	log.Printf("DEBUG: Registered Python route: %s %s -> FastAPI %s", route.Method, route.Route, metadata["fastapi_path"])
+
 	return route
+}
+
+// extractRouteName removes htmx_ prefix and method prefix from function name
+func (p *PythonRouteBuilder) extractRouteName(functionName string) string {
+	// Remove htmx_ prefix
+	routeName := strings.TrimPrefix(functionName, "htmx_")
+
+	// Remove method prefix if present
+	methodPrefixes := []string{"get_", "post_", "put_", "delete_", "patch_"}
+	for _, prefix := range methodPrefixes {
+		if strings.HasPrefix(strings.ToLower(routeName), prefix) {
+			routeName = routeName[len(prefix):]
+			break
+		}
+	}
+
+	return routeName
 }
 
 // buildFastAPIPath creates the path that will be sent to the FastAPI server
@@ -262,6 +280,7 @@ func (p *PythonRouteBuilder) createProxyHandler(basePath, functionName string) h
 		// Build the FastAPI server URL path
 		fastAPIPath := p.buildFastAPIPath(basePath, functionName)
 		targetURL := p.GetFastAPIURL() + fastAPIPath
+		log.Printf("DEBUG: Proxying %s %s -> %s", r.Method, r.URL.Path, targetURL)
 
 		// Read the request body
 		var body io.Reader
@@ -351,20 +370,37 @@ func copyHeaders(src, dst http.Header) {
 	}
 }
 
+// determineHTTPMethod extracts HTTP method from function name
 func (p *PythonRouteBuilder) determineHTTPMethod(functionName string) string {
 	name := strings.ToLower(functionName)
 
-	switch {
-	case strings.Contains(name, "create") || strings.Contains(name, "add") || strings.Contains(name, "post"):
+	// Check for explicit method prefixes after htmx_
+	if strings.HasPrefix(name, "htmx_get_") {
+		return "GET"
+	}
+	if strings.HasPrefix(name, "htmx_post_") {
 		return "POST"
-	case strings.Contains(name, "update") || strings.Contains(name, "edit") || strings.Contains(name, "put"):
+	}
+	if strings.HasPrefix(name, "htmx_put_") {
+		return "PUT"
+	}
+	if strings.HasPrefix(name, "htmx_delete_") {
+		return "DELETE"
+	}
+	if strings.HasPrefix(name, "htmx_patch_") {
+		return "PATCH"
+	}
+
+	// Fallback to semantic analysis for functions without explicit method
+	switch {
+	case strings.Contains(name, "form") || strings.Contains(name, "create") || strings.Contains(name, "submit"):
+		return "POST"
+	case strings.Contains(name, "update") || strings.Contains(name, "edit"):
 		return "PUT"
 	case strings.Contains(name, "delete") || strings.Contains(name, "remove"):
 		return "DELETE"
-	case strings.Contains(name, "get") || strings.Contains(name, "fetch") || strings.Contains(name, "load"):
-		return "GET"
 	default:
-		return "POST" // Default for HTMX interactions
+		return "GET" // Default for HTMX interactions
 	}
 }
 

@@ -58,6 +58,7 @@ func main() {
 		Build()
 
 	log.Printf("HTMLnoJS server starting at http://localhost:%d", *port)
+	log.Printf("FastAPI backend expected at http://localhost:%d", *fastapiPort)
 	log.Printf("Route map: http://localhost:%d/_routes", *port)
     log.Printf("Routes.json: http://localhost:%d/_routes.json", *port)
 	log.Printf("Health check: http://localhost:%d/health", *port)

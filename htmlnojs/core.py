@@ -36,8 +36,13 @@ class HTMLnoJS:
         self.go_server = GoServer(str(self.project_dir), self.go_port, self.python_port)
         self.go_server.verbose = verbose
 
-        self.htmx_server = HTMXServer(str(self.project_dir), self.python_port)
-        self.htmx_server.verbose = verbose
+        self.htmx_server = HTMXServer(
+            project_dir=str(self.project_dir),
+            port=self.python_port,
+            go_port=self.go_port,         # ← your real Go server port
+            host="127.0.0.1",             # or localhost, whatever your host is
+            verbose=self.verbose
+        )
 
         InstanceRegistry.register(self)
 
