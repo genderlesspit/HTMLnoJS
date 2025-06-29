@@ -68,3 +68,49 @@ func (c *Config) validate() error {
 
 	return nil
 }
+
+// Add this to your setup.go file after the Setup function:
+
+// Run performs complete project setup with validation and README generation
+func Run(projectDir string) error {
+	// Setup directory structure
+	config, err := Setup(projectDir)
+	if err != nil {
+		return fmt.Errorf("setup failed: %w", err)
+	}
+
+	// Run globber to discover all files
+	fileSet, err := config.GlobFiles()
+	if err != nil {
+		return fmt.Errorf("file discovery failed: %w", err)
+	}
+	log.Printf("File discovery complete: %d py_htmx, %d templates, %d css files",
+		len(fileSet.PyHTMXFiles), len(fileSet.TemplateFiles), len(fileSet.CSSFiles))
+
+	// Validate HTML templates
+	htmlValidator := NewHTMLValidator(config)
+	if err := htmlValidator.ValidateTemplatesDir(); err != nil {
+		return fmt.Errorf("HTML validation failed: %w", err)
+	}
+
+	// Validate Python HTMX files
+	pyValidator := NewPyHTMXValidator(config)
+	if err := pyValidator.ValidatePyHTMXDir(); err != nil {
+		return fmt.Errorf("Python HTMX validation failed: %w", err)
+	}
+
+	// Validate CSS files
+	cssValidator := NewCSSValidator(config)
+	if err := cssValidator.ValidateCSSDir(); err != nil {
+		return fmt.Errorf("CSS validation failed: %w", err)
+	}
+
+	// Summary report
+	log.Printf("=== HTMLnoJS Setup Complete ===")
+	log.Printf("HTML routes: %d", htmlValidator.GetHTMLCount())
+	log.Printf("Python handlers: %d", pyValidator.GetPyCount())
+	log.Printf("CSS files: %d (%.2f KB)", cssValidator.GetCSSCount(), float64(cssValidator.GetTotalSize())/1024)
+	log.Printf("Project ready at: %s", projectDir)
+
+	return nil
+}

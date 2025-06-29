@@ -11,7 +11,7 @@ func main() {
 	directory := flag.String("directory", ".", "Project directory to setup")
 	flag.Parse()
 
-	_, err := setup.Setup(*directory)
+	err := setup.Run(*directory)
 	if err != nil {
 		log.Fatal(err)
 	}

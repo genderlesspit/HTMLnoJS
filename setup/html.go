@@ -54,7 +54,7 @@ func (h *HTMLValidator) ValidateTemplatesDir() error {
 }
 
 func (h *HTMLValidator) provisionReadme() error {
-	readmePath := filepath.Join(h.config.ProjectDir, "README.md")
+	readmePath := filepath.Join(h.config.TemplatesDir, "README.md")
 	if _, err := os.Stat(readmePath); os.IsNotExist(err) {
 		content, err := GetTemplatesREADME()
 		if err != nil {
