@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HTMLnoJS Demo</title>
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+</head>
+<body>
+    <div class="container">
+        <h1 class="title">Welcome to HTMLnoJS! 🚀</h1>
+        <p class="subtitle">A Go-powered HTMX framework</p>
+
+        <div class="demo-section">
+            <h2>Interactive Demo</h2>
+            <button hx-get="/api/demo/hello" hx-target="#demo-result" class="btn btn-primary">
+                Click me for HTMX magic!
+            </button>
+            <div id="demo-result" class="result-box"></div>
+        </div>
+
+        <div class="demo-section">
+            <h2>Form Demo</h2>
+            <form hx-post="/api/demo/form" hx-target="#form-result">
+                <input type="text" name="message" placeholder="Enter a message" class="input" required>
+                <button type="submit" class="btn btn-secondary">Submit</button>
+            </form>
+            <div id="form-result" class="result-box"></div>
+        </div>
+
+        <div class="demo-section">
+            <h2>Navigation</h2>
+            <nav class="nav">
+                <a href="/about" class="nav-link">About</a>
+                <a href="/contact" class="nav-link">Contact</a>
+            </nav>
+        </div>
+    </div>
+</body>
+</html>

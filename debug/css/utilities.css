@@ -1,0 +1,42 @@
+.result-box {
+    margin-top: 1rem;
+    padding: 1rem;
+    border-radius: var(--border-radius);
+    min-height: 50px;
+    background-color: #f8f9fa;
+    border-left: 4px solid var(--primary-color);
+}
+
+.nav {
+    display: flex;
+    gap: 1rem;
+    margin-top: 1rem;
+}
+
+.nav-link {
+    color: var(--primary-color);
+    text-decoration: none;
+    font-weight: 600;
+    padding: 0.5rem 1rem;
+    border-radius: var(--border-radius);
+    transition: background-color 0.3s ease;
+}
+
+.nav-link:hover {
+    background-color: rgba(52, 152, 219, 0.1);
+}
+
+.features ul {
+    list-style: none;
+    padding-left: 0;
+}
+
+.features li {
+    padding: 0.5rem 0;
+    border-bottom: 1px solid #eee;
+}
+
+.text {
+    margin-bottom: 1.5rem;
+    line-height: 1.7;
+}
